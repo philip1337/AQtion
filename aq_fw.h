@@ -1,4 +1,4 @@
-/*
+/**
  * aQuantia Corporation Network Driver
  * Copyright (C) 2014-2017 aQuantia Corporation. All rights reserved
  *
@@ -15,7 +15,7 @@
  *   disclaimer in the documentation and/or other materials provided
  *   with the distribution.
  *
- *   (3)The name of the author may not be used to endorse or promote
+ *   (3) The name of the author may not be used to endorse or promote
  *   products derived from this software without specific prior
  *   written permission.
  *
@@ -31,55 +31,46 @@
  * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+#ifndef AQ_FW_H
+#define AQ_FW_H
 
-#ifndef _AQ_COMMON_H_
-#define _AQ_COMMON_H_
+struct aq_hw;
 
-#include <stdint.h>
+typedef enum aq_fw_link_speed
+{
+    aq_fw_none  = 0,
+    aq_fw_100M  = (1 << 0),
+    aq_fw_1G    = (1 << 1),
+    aq_fw_2G5   = (1 << 2),
+    aq_fw_5G    = (1 << 3),
+    aq_fw_10G   = (1 << 4),
+} aq_fw_link_speed_t;
 
-#define ETH_MAC_LEN 6
+typedef enum aq_fw_link_fc
+{
+    aq_fw_fc_none  = 0,
+    aq_fw_fc_ENABLE_RX = BIT(0),
+    aq_fw_fc_ENABLE_TX = BIT(1),
+    aq_fw_fc_ENABLE_ALL = aq_fw_fc_ENABLE_RX | aq_fw_fc_ENABLE_TX,
+} aq_fw_link_fc_t;
 
-/* Types definition */
-#define TRUE     1
-#define FALSE    0
+#define aq_fw_speed_auto (aq_fw_100M | aq_fw_1G | aq_fw_2G5 | aq_fw_5G | aq_fw_10G)
 
-#define s8       __int8_t
-#define u8       __uint8_t
-#define u16      __uint16_t
-#define s16      __int16_t
-#define u32      __uint32_t
-#define u64      __uint64_t
-#define s64      __int64_t
-#define s32      int
-typedef __uint32_t DWORD;
+struct aq_firmware_ops
+{
+    int (*reset)(struct aq_hw* hal);
 
-#define ETIME ETIMEDOUT
-#define EOK 0
+    int (*set_mode)(struct aq_hw* hal, enum aq_hw_fw_mpi_state_e mode, aq_fw_link_speed_t speed);
+    int (*get_mode)(struct aq_hw* hal, enum aq_hw_fw_mpi_state_e* mode, aq_fw_link_speed_t* speed, aq_fw_link_fc_t* fc);
 
-#define BIT(nr) (1UL << (nr))
+    int (*get_mac_addr)(struct aq_hw* hal, u8* mac_addr);
+    int (*get_stats)(struct aq_hw* hal, struct aq_hw_stats_s* stats);
 
-#define usec_delay(x) DELAY(x)
-
-#ifndef msec_delay
-#define msec_delay(x) DELAY(x*1000)
-#define msec_delay_irq(x) DELAY(x*1000)
-#endif
-
-#define AQ_HW_WAIT_FOR(_B_, _US_, _N_) \
-    do { \
-        unsigned int i; \
-        for (i = _N_; (!(_B_)) && i; --i) { \
-            usec_delay(_US_); \
-        } \
-        if (!i) { \
-            err = -1; \
-        } \
-    } while (0)
+    int (*led_control)(struct aq_hw* hal, u32 mode);
+};
 
 
-#define LODWORD(a) ((DWORD)(a))
-#define LOWORD(a) ((u16)(a))
-#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+int aq_fw_reset(struct aq_hw* hw);
+int aq_fw_ops_init(struct aq_hw* hw);
 
-#endif //_AQ_COMMON_H_
-
+#endif // AQ_FW_H

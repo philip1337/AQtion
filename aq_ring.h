@@ -2,176 +2,183 @@
  * aQuantia Corporation Network Driver
  * Copyright (C) 2014-2017 aQuantia Corporation. All rights reserved
  *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- */
-
-/* File aq_ring.h: Declaration of functions for Rx/Tx rings. */
-
-#ifndef AQ_RING_H
-#define AQ_RING_H
-
-#include "aq_common.h"
-
-struct page;
-struct aq_nic_cfg_s;
-
-struct aq_rxpage {
-	struct page *page;
-	dma_addr_t daddr;
-	unsigned order;
-	unsigned pg_off;
-};
-
-/*           TxC       SOP        DX         EOP
- *         +----------+----------+----------+-----------
- *   8bytes|len l3,l4 | pa       | pa       | pa
- *         +----------+----------+----------+-----------
- * 4/8bytes|len pkt   |len pkt   |          | skb
- *         +----------+----------+----------+-----------
- * 4/8bytes|is_txc    |len,flags |len       |len,is_eop
- *         +----------+----------+----------+-----------
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- *  This aq_ring_buff_s doesn't have endianness dependency.
- *  It is __packed for cache line optimizations.
+ *   (1) Redistributions of source code must retain the above
+ *   copyright notice, this list of conditions and the following
+ *   disclaimer.
+ *
+ *   (2) Redistributions in binary form must reproduce the above
+ *   copyright notice, this list of conditions and the following
+ *   disclaimer in the documentation and/or other materials provided
+ *   with the distribution.
+ *
+ *   (3)The name of the author may not be used to endorse or promote
+ *   products derived from this software without specific prior
+ *   written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
+ * OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+ * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-struct __packed aq_ring_buff_s {
-	union {
-		/* RX/TX */
-		dma_addr_t pa;
-		/* RX */
-		struct {
-			u32 rss_hash;
-			u16 next;
-			u8 is_hash_l4;
-			u8 rsvd1;
-			struct aq_rxpage rxdata;
-		};
-		/* EOP */
-		struct {
-			dma_addr_t pa_eop;
-			struct sk_buff *skb;
-		};
-		/* TxC */
-		struct {
-			u32 mss;
-			u8 len_l2;
-			u8 len_l3;
-			u8 len_l4;
-			u8 is_ipv6:1;
-			u8 rsvd2:7;
-			u32 len_pkt;
-		};
-	};
-	union {
-		struct {
-			u16 len;
-			u32 is_ip_cso:1;
-			u32 is_udp_cso:1;
-			u32 is_tcp_cso:1;
-			u32 is_cso_err:1;
-			u32 is_sop:1;
-			u32 is_eop:1;
-			u32 is_txc:1;
-			u32 is_mapped:1;
-			u32 is_cleaned:1;
-			u32 is_error:1;
-			u32 rsvd3:6;
-			u16 eop_index;
-			u16 rsvd4;
-		};
-		u64 flags;
-	};
+
+#ifndef _AQ_RING_H_
+#define _AQ_RING_H_
+
+#include "aq_hw.h"
+
+#define REFILL_THRESHOLD 128
+
+
+typedef volatile struct {
+    u32 rss_type:4;
+    u32 pkt_type:8;
+    u32 rdm_err:1;
+    u32 rsvd:6;
+    u32 rx_cntl:2;
+    u32 sph:1;
+    u32 hdr_len:10;
+    u32 rss_hash;
+    u16 dd:1;
+    u16 eop:1;
+    u16 rx_stat:4;
+    u16 rx_estat:6;
+    u16 rsc_cnt:4;
+    u16 pkt_len;
+    u16 next_desp;
+    u16 vlan;
+} __attribute__((__packed__)) aq_rx_wb_t;
+
+typedef volatile struct {
+    union {
+        /* HW RX descriptor */
+        struct __packed {
+            u64 buf_addr;
+            u64 hdr_addr;
+        } read;
+
+        /* HW RX descriptor writeback */
+        aq_rx_wb_t wb;
+    };
+} __attribute__((__packed__)) aq_rx_desc_t;
+
+/* Hardware tx descriptor */
+typedef volatile struct {
+    u64 buf_addr;
+
+    union {
+        struct {
+            u32 type:3;
+            u32 :1;
+            u32 len:16;
+            u32 dd:1;
+            u32 eop:1;
+            u32 cmd:8;
+            u32 :14;
+            u32 ct_idx:1;
+            u32 ct_en:1;
+            u32 pay_len:18;
+        } __attribute__((__packed__));
+        u64 flags;
+    };
+} __attribute__((__packed__)) aq_tx_desc_t;
+
+enum aq_tx_desc_type {
+    tx_desc_type_desc = 1,
+    tx_desc_type_ctx = 2,
 };
 
-struct aq_ring_stats_rx_s {
-	u64 errors;
-	u64 packets;
-	u64 bytes;
-	u64 lro_packets;
-	u64 jumbo_packets;
-	u64 pg_losts;
-	u64 pg_flips;
-	u64 pg_reuses;
+enum aq_tx_desc_cmd {
+    tx_desc_cmd_vlan = 1,
+    tx_desc_cmd_fcs = 2,
+    tx_desc_cmd_ipv4 = 4,
+    tx_desc_cmd_l4cs = 8,
+    tx_desc_cmd_lso = 0x10,
+    tx_desc_cmd_wb = 0x20,
 };
 
-struct aq_ring_stats_tx_s {
-	u64 errors;
-	u64 packets;
-	u64 bytes;
-	u64 queue_restarts;
+/* Hardware tx context descriptor */
+typedef volatile union {
+    struct __packed {
+        u64 flags1;
+        u64 flags2;
+    };
+
+    struct __packed {
+        u64 :40;
+        u32 tun_len:8;
+        u32 out_len:16;
+        u32 type:3;
+        u32 idx:1;
+        u32 vlan_tag:16;
+        u32 cmd:4;
+        u32 l2_len:7;
+        u32 l3_len:9;
+        u32 l4_len:8;
+        u32 mss_len:16;
+    };
+} __attribute__((__packed__)) aq_txc_desc_t;
+
+struct aq_ring_stats {
+	u64 rx_pkts;
+	u64 rx_bytes;
+	u64 jumbo_pkts;
+	u64 rx_err;
+	u64 irq;
+
+	u64 tx_pkts;
+	u64 tx_bytes;
+	u64 tx_drops;
+	u64 tx_queue_full;
 };
 
-union aq_ring_stats_s {
-	struct aq_ring_stats_rx_s rx;
-	struct aq_ring_stats_tx_s tx;
+struct aq_dev;
+
+struct aq_ring {
+    struct aq_dev *dev;
+    int index;
+
+    struct if_irq irq;
+    int msix;
+/* RX */
+    qidx_t rx_size;
+    int rx_max_frame_size;
+    void *rx_desc_area_ptr;
+    aq_rx_desc_t *rx_descs;
+    uint64_t rx_descs_phys;
+
+/* TX */
+    int tx_head, tx_tail;
+    qidx_t tx_size;
+    void *tx_desc_area_ptr;
+    aq_tx_desc_t *tx_descs;
+    uint64_t tx_descs_phys;
+
+    struct aq_ring_stats stats;
 };
 
-struct aq_ring_s {
-	struct aq_ring_buff_s *buff_ring;
-	u8 *dx_ring;		/* descriptors ring, dma shared mem */
-	struct aq_nic_s *aq_nic;
-	unsigned int idx;	/* for HW layer registers operations */
-	unsigned int hw_head;
-	unsigned int sw_head;
-	unsigned int sw_tail;
-	unsigned int size;	/* descriptors number */
-	unsigned int dx_size;	/* TX or RX descriptor size,  */
-				/* stored here for fater math */
-	unsigned int page_order;
-	union aq_ring_stats_s stats;
-	dma_addr_t dx_ring_pa;
-};
+int aq_ring_rx_init(struct aq_hw *hw, struct aq_ring *ring);
+int aq_ring_tx_init(struct aq_hw *hw, struct aq_ring *ring);
 
-struct aq_ring_param_s {
-	unsigned int vec_idx;
-	unsigned int cpu;
-	cpumask_t affinity_mask;
-};
+int aq_ring_tx_start(struct aq_hw *hw, struct aq_ring *ring);
+int aq_ring_tx_stop(struct aq_hw *hw, struct aq_ring *ring);
+int aq_ring_rx_start(struct aq_hw *hw, struct aq_ring *ring);
+int aq_ring_rx_stop(struct aq_hw *hw, struct aq_ring *ring);
 
-static inline void *aq_buf_vaddr(struct aq_rxpage *rxpage)
-{
-	return page_to_virt(rxpage->page) + rxpage->pg_off;
-}
+int aq_ring_tx_tail_update(struct aq_hw *hw, struct aq_ring *ring, u32 tail);
 
-static inline dma_addr_t aq_buf_daddr(struct aq_rxpage *rxpage)
-{
-	return rxpage->daddr + rxpage->pg_off;
-}
 
-static inline unsigned int aq_ring_next_dx(struct aq_ring_s *self,
-					   unsigned int dx)
-{
-	return (++dx >= self->size) ? 0U : dx;
-}
+extern struct if_txrx aq_txrx;
+int		aq_intr(void *arg);
 
-static inline unsigned int aq_ring_avail_dx(struct aq_ring_s *self)
-{
-	return (((self->sw_tail >= self->sw_head)) ?
-		(self->size - 1) - self->sw_tail + self->sw_head :
-		self->sw_head - self->sw_tail - 1);
-}
-
-struct aq_ring_s *aq_ring_tx_alloc(struct aq_ring_s *self,
-				   struct aq_nic_s *aq_nic,
-				   unsigned int idx,
-				   struct aq_nic_cfg_s *aq_nic_cfg);
-struct aq_ring_s *aq_ring_rx_alloc(struct aq_ring_s *self,
-				   struct aq_nic_s *aq_nic,
-				   unsigned int idx,
-				   struct aq_nic_cfg_s *aq_nic_cfg);
-int aq_ring_init(struct aq_ring_s *self);
-void aq_ring_rx_deinit(struct aq_ring_s *self);
-void aq_ring_free(struct aq_ring_s *self);
-void aq_ring_update_queue_state(struct aq_ring_s *ring);
-void aq_ring_queue_wake(struct aq_ring_s *ring);
-void aq_ring_queue_stop(struct aq_ring_s *ring);
-bool aq_ring_tx_clean(struct aq_ring_s *self);
-int aq_ring_rx_clean(struct aq_ring_s *self,
-		     struct napi_struct *napi,
-		     int *work_done,
-		     int budget);
-int aq_ring_rx_fill(struct aq_ring_s *self);
-
-#endif /* AQ_RING_H */
+#endif /* _AQ_RING_H_ */
