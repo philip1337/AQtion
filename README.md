@@ -2,6 +2,9 @@
 
 Atlantic driver for FreeBSD
 
+Supports:
+* xg-c100c
+
 https://www.ixsystems.com/community/threads/how-to-install-drivers-for-a-nic-aqtion-aqc107-xg-c100c.76856/
 
 # FreeNAS
